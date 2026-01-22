@@ -2,7 +2,7 @@
 
 A modern, beautiful web application for viewing amateur radio logbook statistics and generating QSL cards.
 
-🔗 **Live Demo:** [https://ea7lhs.github.io/ham-radio-logbook](https://ea7lhs.github.io/ham-radio-logbook)
+🔗 **Live Demo:** [https://ea7lhs.github.io/ea7lhs](https://ea7lhs.github.io/ea7lhs)
 
 ![Ham Radio Logbook](https://img.shields.io/badge/Ham%20Radio-Logbook-success)
 ![QSL Generator](https://img.shields.io/badge/QSL-Generator-blue)
