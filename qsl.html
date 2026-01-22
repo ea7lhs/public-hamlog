@@ -23,7 +23,7 @@
                 const config = response.ok ? await response.json() : { cssFile: 'default.css' };
                 const link = document.createElement('link');
                 link.rel = 'stylesheet';
-                link.href = config.cssFile || 'default.css';
+                link.href = 'styles/' + config.cssFile || 'default.css';
                 
                 // Mostrar body cuando el CSS se cargue
                 link.onload = function() {
