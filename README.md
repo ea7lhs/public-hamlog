@@ -7,6 +7,10 @@ A modern, beautiful web application for viewing amateur radio logbook statistics
 ![Ham Radio Logbook](https://img.shields.io/badge/Ham%20Radio-Logbook-success)
 ![QSL Generator](https://img.shields.io/badge/QSL-Generator-blue)
 
+
+<img width="1920" height="1280" alt="hamlog1" src="https://github.com/user-attachments/assets/f0fce88a-a419-4d75-9cbf-f53e4176045e" />
+
+
 ---
 
 ## 🌟 What is this?
