@@ -1,0 +1,15 @@
+{
+  "callsign": "N0CALL",
+  "name": "Example Operator",
+  "location": "Example City, Country",
+  "cssFile": "default.css",
+  "qslBackgroundImage": "bg.jpg",
+  "qslBackgroundBlur": 8,
+  "qslBackgroundOpacity": 0.7,
+  "display": {
+    "topCountries": 5,
+    "topModes": 10,
+    "recentContacts": 10,
+    "maxSearchResults": 50
+  }
+}

@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EA7LHS - Logbook Statistics</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        /* Critical CSS - Previene FOUC */
+        body {
+            opacity: 0;
+            transition: opacity 0.3s ease-in;
+        }
+        body.styles-loaded {
+            opacity: 1;
+        }
+    </style>
+    <script>
+        // Load CSS from config
+        (async function loadCSS() {
+            try {
+                const response = await fetch('config.json');
+                const config = response.ok ? await response.json() : { cssFile: 'default.css' };
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = 'styles/' + (config.cssFile || 'default.css');
+                
+                // Mostrar body cuando el CSS se cargue
+                link.onload = function() {
+                    document.body.classList.add('styles-loaded');
+                };
+                
+                // Fallback por si acaso
+                setTimeout(function() {
+                    document.body.classList.add('styles-loaded');
+                }, 1000);
+                
+                document.head.appendChild(link);
+            } catch (error) {
+                console.error('Error loading CSS config:', error);
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = 'default.css';
+                link.onload = function() {
+                    document.body.classList.add('styles-loaded');
+                };
+                document.head.appendChild(link);
+            }
+        })();
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="callsign" id="callsign">EA7LHS</div>
+            <h1>Logbook Statistics</h1>
+            <div class="subtitle">Amateur Radio Contact Analysis by EA7LHS</div>
+        </div>
+
+        <div id="loading" class="loading">
+            [LOADING LOGBOOK DATA...]
+        </div>
+
+        <div id="content" class="hidden">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total QSOs</div>
+                    <div class="stat-value" id="total-qsos">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Countries</div>
+                    <div class="stat-value" id="total-countries">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Modes Used</div>
+                    <div class="stat-value" id="total-modes">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Bands Used</div>
+                    <div class="stat-value" id="total-bands">0</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Activity Map</div>
+                <div class="year-controls">
+                    <button class="year-nav-button" id="prev-year">◀</button>
+                    <div class="current-year" id="current-year">2026</div>
+                    <button class="year-nav-button" id="next-year">▶</button>
+                </div>
+                <div class="activity-grid">
+                    <div class="activity-months">
+                        <div class="month-label">Jan</div>
+                        <div class="month-label">Feb</div>
+                        <div class="month-label">Mar</div>
+                        <div class="month-label">Apr</div>
+                        <div class="month-label">May</div>
+                        <div class="month-label">Jun</div>
+                        <div class="month-label">Jul</div>
+                        <div class="month-label">Aug</div>
+                        <div class="month-label">Sep</div>
+                        <div class="month-label">Oct</div>
+                        <div class="month-label">Nov</div>
+                        <div class="month-label">Dec</div>
+                    </div>
+                    <div class="activity-weeks" id="activity-grid"></div>
+                    <div class="activity-legend">
+                        <span>Less</span>
+                        <div class="legend-box legend-box-empty"></div>
+                        <div class="legend-box legend-box-low"></div>
+                        <div class="legend-box legend-box-medium"></div>
+                        <div class="legend-box legend-box-high"></div>
+                        <div class="legend-box legend-box-very-high"></div>
+                        <span>More</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-column">
+                <div class="section">
+                    <div class="section-title">Top Countries</div>
+                    <div class="top-list" id="top-countries"></div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">Top Modes</div>
+                    <div class="top-list" id="top-modes"></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Search Contacts</div>
+                <div class="search-container">
+                    <input type="text" id="search-input" class="search-input" placeholder="Search by callsign, name, country, mode...">
+                    <button id="search-button" class="search-button">Search</button>
+                </div>
+                <div id="search-results" class="mt-1-5"></div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Latest 10 Contacts</div>
+                <div class="overflow-auto">
+                    <table class="contacts-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>Callsign</th>
+                                <th>Name</th>
+                                <th>Country</th>
+                                <th>Mode</th>
+                                <th>Band</th>
+                                <th>QSL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-contacts"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="error" class="error hidden">
+            <h2>ERROR</h2>
+            <p>No se pudo cargar el archivo logbook.adi</p>
+            <p>Asegúrate de que el archivo existe en el mismo directorio que esta página.</p>
+        </div>
+    </div>
+
+    <script>
+        class LogbookParser {
+            constructor() {
+                this.contacts = [];
+            }
+
+            parseADI(text) {
+                const contacts = [];
+                const records = text.split('<eor>');
+                
+                for (let record of records) {
+                    if (record.trim().length === 0 || record.includes('<eoh>')) continue;
+                    
+                    const contact = {};
+                    const fieldRegex = /<(\w+):(\d+)>([^<]*)/g;
+                    let match;
+                    
+                    while ((match = fieldRegex.exec(record)) !== null) {
+                        const [, fieldName, , fieldValue] = match;
+                        contact[fieldName.toLowerCase()] = fieldValue.trim();
+                    }
+                    
+                    if (contact.call) {
+                        contacts.push(contact);
+                    }
+                }
+                
+                this.contacts = contacts;
+                return contacts;
+            }
+
+            getStats() {
+                const countries = new Set();
+                const modes = new Set();
+                const bands = new Set();
+                const countryCount = {};
+                const modeCount = {};
+                const dailyActivity = {};
+
+                for (let contact of this.contacts) {
+                    if (contact.country) {
+                        countries.add(contact.country);
+                        countryCount[contact.country] = (countryCount[contact.country] || 0) + 1;
+                    }
+                    if (contact.mode) {
+                        modes.add(contact.mode);
+                        modeCount[contact.mode] = (modeCount[contact.mode] || 0) + 1;
+                    }
+                    if (contact.band) bands.add(contact.band);
+                    
+                    if (contact.qso_date) {
+                        const date = this.formatDate(contact.qso_date);
+                        dailyActivity[date] = (dailyActivity[date] || 0) + 1;
+                    }
+                }
+
+                return {
+                    totalQSOs: this.contacts.length,
+                    totalCountries: countries.size,
+                    totalModes: modes.size,
+                    totalBands: bands.size,
+                    countryCount,
+                    modeCount,
+                    dailyActivity
+                };
+            }
+
+            formatDate(adiDate) {
+                // ADI format: YYYYMMDD
+                if (!adiDate || adiDate.length !== 8) return null;
+                const year = adiDate.substring(0, 4);
+                const month = adiDate.substring(4, 6);
+                const day = adiDate.substring(6, 8);
+                return `${year}-${month}-${day}`;
+            }
+
+            formatDisplayDate(adiDate) {
+                if (!adiDate || adiDate.length !== 8) return '';
+                const year = adiDate.substring(0, 4);
+                const month = adiDate.substring(4, 6);
+                const day = adiDate.substring(6, 8);
+                return `${day}/${month}/${year}`;
+            }
+
+            formatTime(adiTime) {
+                if (!adiTime) return '';
+                const padded = adiTime.padStart(4, '0');
+                const hours = padded.substring(0, 2);
+                const minutes = padded.substring(2, 4);
+                return `${hours}:${minutes}`;
+            }
+
+            getQSLUrl(contact) {
+                const params = new URLSearchParams({
+                    call: contact.call,
+                    date: contact.qso_date || '',
+                    time: contact.time_on || ''
+                });
+                return `qsl.html?${params.toString()}`;
+            }
+
+            getRecentContacts(limit = 20) {
+                return [...this.contacts]
+                    .sort((a, b) => {
+                        const dateA = parseInt(a.qso_date || 0);
+                        const dateB = parseInt(b.qso_date || 0);
+                        if (dateA !== dateB) return dateB - dateA;
+                        const timeA = parseInt(a.time_on || 0);
+                        const timeB = parseInt(b.time_on || 0);
+                        return timeB - timeA;
+                    })
+                    .slice(0, limit);
+            }
+        }
+
+        class ActivityHeatmap {
+            constructor(containerId, year = 2026) {
+                this.container = document.getElementById(containerId);
+                this.year = year;
+            }
+
+            render(dailyActivity) {
+                this.container.innerHTML = '';
+                const startDate = new Date(this.year, 0, 1);
+                
+                // Find the first Sunday of the year (or before)
+                const firstDay = new Date(startDate);
+                firstDay.setDate(firstDay.getDate() - firstDay.getDay());
+                
+                // Calculate the last day of the year
+                const endDate = new Date(this.year, 11, 31);
+                const lastDay = new Date(endDate);
+                lastDay.setDate(lastDay.getDate() + (6 - lastDay.getDay()));
+                
+                // Calculate activity levels
+                const activities = Object.values(dailyActivity);
+                const max = Math.max(...activities, 1);
+                
+                let currentDate = new Date(firstDay);
+                
+                // Create days organized by weeks
+                while (currentDate <= lastDay) {
+                    const dateStr = currentDate.toISOString().split('T')[0];
+                    const count = dailyActivity[dateStr] || 0;
+                    const level = this.getLevel(count, max);
+                    
+                    const day = document.createElement('div');
+                    day.className = 'activity-day';
+                    day.setAttribute('data-level', level);
+                    day.title = `${dateStr}: ${count} QSO${count !== 1 ? 's' : ''}`;
+                    
+                    // Dim days outside the current year
+                    const year = currentDate.getFullYear();
+                    if (year !== this.year) {
+                        day.style.opacity = '0.3';
+                    }
+                    
+                    this.container.appendChild(day);
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+            }
+
+            getLevel(count, max) {
+                if (count === 0) return 0;
+                const percentage = count / max;
+                if (percentage >= 0.75) return 4;
+                if (percentage >= 0.50) return 3;
+                if (percentage >= 0.25) return 2;
+                return 1;
+            }
+        }
+
+        let logbookText = '';
+        let config = {};
+        let currentYear = new Date().getFullYear();
+        let statsData = null;
+
+        async function loadConfig() {
+            try {
+                const response = await fetch('config.json');
+                if (!response.ok) {
+                    // Default config if file not found
+                    return {
+                        callsign: "EA7LHS",
+                        name: "Daniel",
+                        location: "Loja, Spain",
+                        cssFile: "default.css",
+                        display: {
+                            topCountries: 5,
+                            topModes: 10,
+                            recentContacts: 10,
+                            maxSearchResults: 50
+                        }
+                    };
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('Error loading config:', error);
+                // Return default config
+                return {
+                    callsign: "EA7LHS",
+                    name: "Daniel",
+                    location: "Loja, Spain",
+                    cssFile: "default.css",
+                    display: {
+                        topCountries: 5,
+                        topModes: 10,
+                        recentContacts: 10,
+                        maxSearchResults: 50
+                    }
+                };
+            }
+        }
+
+        async function loadLogbook() {
+            try {
+                // Load config first
+                config = await loadConfig();
+                
+                // Update callsign in header
+                document.getElementById('callsign').textContent = config.callsign;
+                
+                // Update current year display
+                document.getElementById('current-year').textContent = currentYear;
+                
+                const response = await fetch('logbook.adi');
+                if (!response.ok) throw new Error('File not found');
+                
+                const text = await response.text();
+                logbookText = text; // Store for searching
+                
+                const parser = new LogbookParser();
+                parser.parseADI(text);
+                
+                const stats = parser.getStats();
+                statsData = stats; // Store for year navigation
+                
+                // Update stats
+                document.getElementById('total-qsos').textContent = stats.totalQSOs;
+                document.getElementById('total-countries').textContent = stats.totalCountries;
+                document.getElementById('total-modes').textContent = stats.totalModes;
+                document.getElementById('total-bands').textContent = stats.totalBands;
+                
+                // Render activity heatmap with current year
+                renderActivityMap();
+                
+                // Top countries (use config)
+                const topCountries = Object.entries(stats.countryCount)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, config.display.topCountries);
+                
+                const countriesContainer = document.getElementById('top-countries');
+                countriesContainer.innerHTML = topCountries.map(([country, count]) => `
+                    <div class="top-item">
+                        <span class="top-item-label">${country}</span>
+                        <span class="top-item-value">${count}</span>
+                    </div>
+                `).join('');
+                
+                // Top modes (use config)
+                const topModes = Object.entries(stats.modeCount)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, config.display.topModes);
+                
+                const modesContainer = document.getElementById('top-modes');
+                modesContainer.innerHTML = topModes.map(([mode, count]) => `
+                    <div class="top-item">
+                        <span class="top-item-label">${mode}</span>
+                        <span class="top-item-value">${count}</span>
+                    </div>
+                `).join('');
+                
+                // Recent contacts (use config)
+                const recentContacts = parser.getRecentContacts(config.display.recentContacts);
+                const contactsContainer = document.getElementById('recent-contacts');
+                contactsContainer.innerHTML = recentContacts.map(contact => `
+                    <tr>
+                        <td>${parser.formatDisplayDate(contact.qso_date)}</td>
+                        <td>${parser.formatTime(contact.time_on)}</td>
+                        <td class="callsign-cell">${contact.call}</td>
+                        <td>${contact.name || '-'}</td>
+                        <td class="country-cell">${contact.country || '-'}</td>
+                        <td><span class="mode-badge">${contact.mode || '-'}</span></td>
+                        <td><span class="band-badge">${contact.band || '-'}</span></td>
+                        <td><a href="${parser.getQSLUrl(contact)}" class="qsl-btn" target="_blank">View QSL</a></td>
+                    </tr>
+                `).join('');
+                
+                // Update section title for recent contacts
+                const recentContactsTitle = document.querySelectorAll('.section-title')[4];
+                if (recentContactsTitle) {
+                    recentContactsTitle.textContent = `Latest ${config.display.recentContacts} Contacts`;
+                }
+                
+                // Show content
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').classList.remove('hidden');
+                
+            } catch (error) {
+                console.error('Error loading logbook:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').classList.remove('hidden');
+            }
+        }
+
+        function searchContacts(searchTerm) {
+            if (!searchTerm || searchTerm.trim().length === 0) {
+                return { results: [], message: 'Please enter a search term' };
+            }
+
+            const term = searchTerm.toLowerCase().trim();
+            const results = [];
+            
+            // Parse the logbook text and search
+            const records = logbookText.split('<eor>');
+            
+            for (let record of records) {
+                if (record.trim().length === 0 || record.includes('<eoh>')) continue;
+                
+                const contact = {};
+                const fieldRegex = /<(\w+):(\d+)>([^<]*)/g;
+                let match;
+                
+                while ((match = fieldRegex.exec(record)) !== null) {
+                    const [, fieldName, , fieldValue] = match;
+                    contact[fieldName.toLowerCase()] = fieldValue.trim();
+                }
+                
+                if (!contact.call) continue;
+                
+                // Search in multiple fields
+                const searchableText = [
+                    contact.call || '',
+                    contact.name || '',
+                    contact.country || '',
+                    contact.mode || '',
+                    contact.band || '',
+                    contact.qth || '',
+                    contact.gridsquare || ''
+                ].join(' ').toLowerCase();
+                
+                if (searchableText.includes(term)) {
+                    results.push(contact);
+                }
+            }
+            
+            return { 
+                results: results.sort((a, b) => {
+                    const dateA = parseInt(a.qso_date || 0);
+                    const dateB = parseInt(b.qso_date || 0);
+                    if (dateA !== dateB) return dateB - dateA;
+                    const timeA = parseInt(a.time_on || 0);
+                    const timeB = parseInt(b.time_on || 0);
+                    return timeB - timeA;
+                }),
+                message: null
+            };
+        }
+
+        function displaySearchResults(searchData) {
+            const container = document.getElementById('search-results');
+            
+            if (searchData.message) {
+                container.innerHTML = `<div class="search-info">${searchData.message}</div>`;
+                return;
+            }
+            
+            if (searchData.results.length === 0) {
+                container.innerHTML = `<div class="search-no-results">No contacts found matching your search.</div>`;
+                return;
+            }
+            
+            const parser = new LogbookParser();
+            const maxResults = config.display?.maxSearchResults || 50;
+            const limitedResults = searchData.results.slice(0, maxResults);
+            
+            container.innerHTML = `
+                <div class="search-info">Found ${searchData.results.length} contact${searchData.results.length !== 1 ? 's' : ''} ${searchData.results.length > maxResults ? `(showing first ${maxResults})` : ''}</div>
+                <div class="overflow-auto mt-1">
+                    <table class="contacts-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>Callsign</th>
+                                <th>Name</th>
+                                <th>Country</th>
+                                <th>Mode</th>
+                                <th>Band</th>
+                                <th>QSL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${limitedResults.map(contact => `
+                                <tr>
+                                    <td>${parser.formatDisplayDate(contact.qso_date)}</td>
+                                    <td>${parser.formatTime(contact.time_on)}</td>
+                                    <td class="callsign-cell">${contact.call}</td>
+                                    <td>${contact.name || '-'}</td>
+                                    <td class="country-cell">${contact.country || '-'}</td>
+                                    <td><span class="mode-badge">${contact.mode || '-'}</span></td>
+                                    <td><span class="band-badge">${contact.band || '-'}</span></td>
+                                    <td><a href="${parser.getQSLUrl(contact)}" class="qsl-btn" target="_blank">View QSL</a></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function renderActivityMap() {
+            if (!statsData) return;
+            const heatmap = new ActivityHeatmap('activity-grid', currentYear);
+            heatmap.render(statsData.dailyActivity);
+            document.getElementById('current-year').textContent = currentYear;
+        }
+
+        // Load logbook on page load
+        loadLogbook();
+
+        // Setup year navigation
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('prev-year').addEventListener('click', function() {
+                currentYear--;
+                renderActivityMap();
+            });
+
+            document.getElementById('next-year').addEventListener('click', function() {
+                currentYear++;
+                renderActivityMap();
+            });
+        });
+
+        // Setup search functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('search-input');
+            const searchButton = document.getElementById('search-button');
+            
+            function performSearch() {
+                const searchTerm = searchInput.value;
+                const results = searchContacts(searchTerm);
+                displaySearchResults(results);
+            }
+            
+            searchButton.addEventListener('click', performSearch);
+            
+            searchInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    performSearch();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QSL Card Generator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        /* Critical CSS - Previene FOUC */
+        body {
+            opacity: 0;
+            transition: opacity 0.3s ease-in;
+        }
+        body.styles-loaded {
+            opacity: 1;
+        }
+    </style>
+    <script>
+        // Load CSS from config
+        (async function loadCSS() {
+            try {
+                const response = await fetch('config.json');
+                const config = response.ok ? await response.json() : { cssFile: 'default.css' };
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = 'styles/' + (config.cssFile || 'default.css');
+                
+                // Mostrar body cuando el CSS se cargue
+                link.onload = function() {
+                    document.body.classList.add('styles-loaded');
+                };
+                
+                // Fallback por si acaso
+                setTimeout(function() {
+                    document.body.classList.add('styles-loaded');
+                }, 1000);
+                
+                document.head.appendChild(link);
+            } catch (error) {
+                console.error('Error loading CSS config:', error);
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = 'default.css';
+                link.onload = function() {
+                    document.body.classList.add('styles-loaded');
+                };
+                document.head.appendChild(link);
+            }
+        })();
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>QSL Card Generator</h1>
+            <div class="subtitle">73 de <span id="station-call">EA7LHS</span></div>
+        </div>
+
+        <div id="loading" class="loading hidden">
+            [GENERATING QSL CARD...]
+        </div>
+
+        <div id="error" class="error hidden">
+            <h2>ERROR</h2>
+            <p id="error-message"></p>
+        </div>
+
+        <div id="content" class="hidden">
+            <div class="info-box">
+                <h3>Contact Details</h3>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Callsign</div>
+                        <div class="info-value" id="info-call">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Date</div>
+                        <div class="info-value" id="info-date">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Time</div>
+                        <div class="info-value" id="info-time">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Frequency</div>
+                        <div class="info-value" id="info-freq">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Mode</div>
+                        <div class="info-value" id="info-mode">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">RST</div>
+                        <div class="info-value" id="info-rst">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card-preview">
+                <canvas id="qsl-canvas" width="1400" height="900"></canvas>
+                <div class="controls">
+                    <button class="btn" id="download-btn">Download QSL Card</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class QSLGenerator {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                this.contact = null;
+                this.config = null;
+                this.backgroundImage = null;
+            }
+
+            async loadConfig() {
+                try {
+                    const response = await fetch('config.json');
+                    if (!response.ok) {
+                        return {
+                            callsign: "EA7LHS",
+                            name: "Daniel",
+                            location: "Loja, Spain",
+                            cssFile: "default.css",
+                            qslBackgroundImage: "",
+                            qslBackgroundBlur: 8,
+                            qslBackgroundOpacity: 0.7
+                        };
+                    }
+                    return await response.json();
+                } catch (error) {
+                    return {
+                        callsign: "EA7LHS",
+                        name: "Daniel",
+                        location: "Loja, Spain",
+                        cssFile: "default.css",
+                        qslBackgroundImage: "",
+                        qslBackgroundBlur: 8,
+                        qslBackgroundOpacity: 0.7
+                    };
+                }
+            }
+
+            async loadBackgroundImage() {
+                if (!this.config.qslBackgroundImage || this.config.qslBackgroundImage.trim() === '') {
+                    return null;
+                }
+
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.onload = () => resolve(img);
+                    img.onerror = () => {
+                        console.warn('Could not load background image:', this.config.qslBackgroundImage);
+                        resolve(null);
+                    };
+                    img.src = this.config.qslBackgroundImage;
+                });
+            }
+
+            async verifyContact(call, date, time) {
+                try {
+                    const response = await fetch('logbook.adi');
+                    if (!response.ok) throw new Error('Logbook not found');
+                    
+                    const text = await response.text();
+                    const records = text.split('<eor>');
+                    
+                    for (let record of records) {
+                        if (record.trim().length === 0 || record.includes('<eoh>')) continue;
+                        
+                        const contact = {};
+                        const fieldRegex = /<(\w+):(\d+)>([^<]*)/g;
+                        let match;
+                        
+                        while ((match = fieldRegex.exec(record)) !== null) {
+                            const [, fieldName, , fieldValue] = match;
+                            contact[fieldName.toLowerCase()] = fieldValue.trim();
+                        }
+                        
+                        // Verify this is the contact we're looking for
+                        if (contact.call === call.toUpperCase()) {
+                            if (date && contact.qso_date !== date) continue;
+                            if (time && contact.time_on !== time) continue;
+                            return contact;
+                        }
+                    }
+                    
+                    return null;
+                } catch (error) {
+                    console.error('Error verifying contact:', error);
+                    return null;
+                }
+            }
+
+            formatDate(adiDate) {
+                if (!adiDate || adiDate.length !== 8) return '';
+                const year = adiDate.substring(0, 4);
+                const month = adiDate.substring(4, 6);
+                const day = adiDate.substring(6, 8);
+                return `${day}/${month}/${year}`;
+            }
+
+            formatTime(adiTime) {
+                if (!adiTime) return '';
+                const padded = adiTime.padStart(4, '0');
+                const hours = padded.substring(0, 2);
+                const minutes = padded.substring(2, 4);
+                return `${hours}:${minutes}`;
+            }
+
+            drawCard() {
+                const ctx = this.ctx;
+                const w = this.canvas.width;
+                const h = this.canvas.height;
+
+                // Get colors from CSS variables
+                const styles = getComputedStyle(document.documentElement);
+                const bgPrimary = styles.getPropertyValue('--bg-primary').trim();
+                const bgSecondary = styles.getPropertyValue('--bg-secondary').trim();
+                const bgCard = styles.getPropertyValue('--bg-card').trim();
+                const accentPrimary = styles.getPropertyValue('--accent-primary').trim();
+                const accentSecondary = styles.getPropertyValue('--accent-secondary').trim();
+                const textPrimary = styles.getPropertyValue('--text-primary').trim();
+                const textSecondary = styles.getPropertyValue('--text-secondary').trim();
+
+                // Background image if available
+                if (this.backgroundImage) {
+                    // Calculate dimensions to cover without stretching
+                    const imgRatio = this.backgroundImage.width / this.backgroundImage.height;
+                    const canvasRatio = w / h;
+                    
+                    let drawWidth, drawHeight, offsetX, offsetY;
+                    
+                    if (imgRatio > canvasRatio) {
+                        // Image is wider than canvas
+                        drawHeight = h;
+                        drawWidth = h * imgRatio;
+                        offsetX = (w - drawWidth) / 2;
+                        offsetY = 0;
+                    } else {
+                        // Image is taller than canvas
+                        drawWidth = w;
+                        drawHeight = w / imgRatio;
+                        offsetX = 0;
+                        offsetY = (h - drawHeight) / 2;
+                    }
+                    
+                    // Apply blur filter from config
+                    const blurAmount = this.config.qslBackgroundBlur || 8;
+                    ctx.filter = `blur(${blurAmount}px)`;
+                    ctx.drawImage(this.backgroundImage, offsetX, offsetY, drawWidth, drawHeight);
+                    ctx.filter = 'none';
+                    
+                    // Add semi-transparent overlay with configurable opacity
+                    const overlayOpacity = this.config.qslBackgroundOpacity !== undefined 
+                        ? this.config.qslBackgroundOpacity 
+                        : 0.7;
+                    
+                    const overlayGradient = ctx.createLinearGradient(0, 0, w, h);
+                    overlayGradient.addColorStop(0, this.hexToRgba(bgPrimary, overlayOpacity));
+                    overlayGradient.addColorStop(0.5, this.hexToRgba(bgSecondary, overlayOpacity - 0.1));
+                    overlayGradient.addColorStop(1, this.hexToRgba(bgCard, overlayOpacity));
+                    ctx.fillStyle = overlayGradient;
+                    ctx.fillRect(0, 0, w, h);
+                } else {
+                    // Background gradient (when no image)
+                    const gradient = ctx.createLinearGradient(0, 0, w, h);
+                    gradient.addColorStop(0, bgPrimary);
+                    gradient.addColorStop(0.5, bgSecondary);
+                    gradient.addColorStop(1, bgCard);
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, w, h);
+                }
+
+                // Grid pattern overlay (more subtle)
+                ctx.strokeStyle = this.hexToRgba(accentPrimary, 0.05);
+                ctx.lineWidth = 1;
+                for (let i = 0; i < w; i += 50) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, 0);
+                    ctx.lineTo(i, h);
+                    ctx.stroke();
+                }
+                for (let i = 0; i < h; i += 50) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, i);
+                    ctx.lineTo(w, i);
+                    ctx.stroke();
+                }
+
+                // Border
+                ctx.strokeStyle = accentPrimary;
+                ctx.lineWidth = 8;
+                ctx.strokeRect(20, 20, w - 40, h - 40);
+
+                // Inner border
+                ctx.strokeStyle = accentSecondary;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(40, 40, w - 80, h - 80);
+
+                // Station callsign (large, top)
+                ctx.fillStyle = accentPrimary;
+                ctx.font = 'bold 120px Orbitron, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.shadowColor = this.hexToRgba(accentPrimary, 0.5);
+                ctx.shadowBlur = 30;
+                ctx.fillText(this.config.callsign, w / 2, 180);
+                ctx.shadowBlur = 0;
+
+                // Operator name and location
+                ctx.fillStyle = textSecondary;
+                ctx.font = '32px Share Tech Mono, monospace';
+                ctx.fillText(`${this.config.name} - ${this.config.location}`, w / 2, 240);
+
+                // "CONFIRMING QSO WITH" text
+                ctx.fillStyle = accentSecondary;
+                ctx.font = 'bold 42px Orbitron, sans-serif';
+                ctx.fillText('CONFIRMING QSO WITH', w / 2, 340);
+
+                // Contact callsign (very large)
+                ctx.fillStyle = accentSecondary;
+                ctx.font = 'bold 140px Orbitron, sans-serif';
+                ctx.shadowColor = this.hexToRgba(accentSecondary, 0.5);
+                ctx.shadowBlur = 40;
+                ctx.fillText(this.contact.call, w / 2, 480);
+                ctx.shadowBlur = 0;
+
+                // QSO Details box
+                const boxY = 560;
+                const boxHeight = 240;
+                
+                // Box background
+                ctx.fillStyle = this.hexToRgba(bgCard, 0.9);
+                ctx.fillRect(100, boxY, w - 200, boxHeight);
+                
+                // Box border
+                ctx.strokeStyle = accentPrimary;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(100, boxY, w - 200, boxHeight);
+
+                // QSO details
+                ctx.textAlign = 'left';
+                ctx.fillStyle = textSecondary;
+                ctx.font = '28px Share Tech Mono, monospace';
+                
+                const detailsY = boxY + 60;
+                const col1X = 150;
+                const col2X = w / 2 + 50;
+                const lineHeight = 55;
+
+                // Column 1
+                ctx.fillText('DATE:', col1X, detailsY);
+                ctx.fillText('TIME:', col1X, detailsY + lineHeight);
+                ctx.fillText('FREQ:', col1X, detailsY + lineHeight * 2);
+
+                // Column 1 values
+                ctx.fillStyle = accentPrimary;
+                ctx.font = 'bold 32px Orbitron, sans-serif';
+                ctx.fillText(this.formatDate(this.contact.qso_date), col1X + 150, detailsY);
+                ctx.fillText(this.formatTime(this.contact.time_on) + ' UTC', col1X + 150, detailsY + lineHeight);
+                ctx.fillText((this.contact.freq || '-') + ' MHz', col1X + 150, detailsY + lineHeight * 2);
+
+                // Column 2
+                ctx.fillStyle = textSecondary;
+                ctx.font = '28px Share Tech Mono, monospace';
+                ctx.fillText('MODE:', col2X, detailsY);
+                ctx.fillText('RST:', col2X, detailsY + lineHeight);
+                ctx.fillText('BAND:', col2X, detailsY + lineHeight * 2);
+
+                // Column 2 values
+                ctx.fillStyle = accentSecondary;
+                ctx.font = 'bold 32px Orbitron, sans-serif';
+                ctx.fillText(this.contact.mode || '-', col2X + 150, detailsY);
+                ctx.fillText(this.contact.rst_rcvd || '-', col2X + 150, detailsY + lineHeight);
+                ctx.fillText(this.contact.band || '-', col2X + 150, detailsY + lineHeight * 2);
+
+                // Footer - 73
+                ctx.textAlign = 'center';
+                ctx.fillStyle = accentPrimary;
+                ctx.font = 'bold 48px Orbitron, sans-serif';
+                ctx.fillText('73', w / 2, h - 50);
+
+                // Add decorative corner elements
+                this.drawCornerDecoration(ctx, 40, 40, 60, accentPrimary);
+                this.drawCornerDecoration(ctx, w - 40, 40, 60, accentSecondary, true, false);
+                this.drawCornerDecoration(ctx, 40, h - 40, 60, accentSecondary, false, true);
+                this.drawCornerDecoration(ctx, w - 40, h - 40, 60, accentPrimary, true, true);
+            }
+
+            hexToRgba(hex, alpha) {
+                // Si ya es rgba o rgb, devolverlo
+                if (hex.startsWith('rgb')) return hex;
+                
+                // Limpiar el hex
+                hex = hex.replace('#', '');
+                
+                // Convertir a RGB
+                let r, g, b;
+                if (hex.length === 3) {
+                    r = parseInt(hex[0] + hex[0], 16);
+                    g = parseInt(hex[1] + hex[1], 16);
+                    b = parseInt(hex[2] + hex[2], 16);
+                } else {
+                    r = parseInt(hex.substring(0, 2), 16);
+                    g = parseInt(hex.substring(2, 4), 16);
+                    b = parseInt(hex.substring(4, 6), 16);
+                }
+                
+                return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            }
+
+            drawCornerDecoration(ctx, x, y, size, color, flipX = false, flipY = false) {
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                
+                const dx = flipX ? -1 : 1;
+                const dy = flipY ? -1 : 1;
+                
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + (size * dx), y);
+                ctx.moveTo(x, y);
+                ctx.lineTo(x, y + (size * dy));
+                
+                ctx.moveTo(x + (20 * dx), y + (20 * dy));
+                ctx.lineTo(x + (40 * dx), y + (20 * dy));
+                ctx.lineTo(x + (40 * dx), y + (40 * dy));
+                ctx.lineTo(x + (20 * dx), y + (40 * dy));
+                ctx.closePath();
+                ctx.stroke();
+            }
+
+            downloadCard() {
+                const link = document.createElement('a');
+                const filename = `QSL_${this.config.callsign}_${this.contact.call}_${this.formatDate(this.contact.qso_date).replace(/\//g, '-')}.png`;
+                link.download = filename;
+                link.href = this.canvas.toDataURL('image/png');
+                link.click();
+            }
+        }
+
+        // Parse URL parameters
+        function getURLParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                call: params.get('call'),
+                date: params.get('date'),
+                time: params.get('time')
+            };
+        }
+
+        // Main initialization
+        async function init() {
+            const params = getURLParams();
+            
+            if (!params.call) {
+                showError('No callsign provided. Please use URL parameters: ?call=CALLSIGN&date=YYYYMMDD&time=HHMM');
+                return;
+            }
+
+            document.getElementById('loading').classList.remove('hidden');
+
+            const generator = new QSLGenerator('qsl-canvas');
+            generator.config = await generator.loadConfig();
+            
+            // Load background image if specified
+            generator.backgroundImage = await generator.loadBackgroundImage();
+            
+            // Update station callsign in header
+            document.getElementById('station-call').textContent = generator.config.callsign;
+
+            // Verify contact exists in logbook
+            const contact = await generator.verifyContact(params.call, params.date, params.time);
+            
+            if (!contact) {
+                showError(`Contact not found in logbook: ${params.call}${params.date ? ' on ' + params.date : ''}`);
+                return;
+            }
+
+            generator.contact = contact;
+
+            // Update info display
+            document.getElementById('info-call').textContent = contact.call;
+            document.getElementById('info-date').textContent = generator.formatDate(contact.qso_date);
+            document.getElementById('info-time').textContent = generator.formatTime(contact.time_on) + ' UTC';
+            document.getElementById('info-freq').textContent = (contact.freq || '-') + ' MHz';
+            document.getElementById('info-mode').textContent = contact.mode || '-';
+            document.getElementById('info-rst').textContent = contact.rst_rcvd || '-';
+
+            // Generate QSL card
+            generator.drawCard();
+
+            // Setup download button
+            document.getElementById('download-btn').addEventListener('click', () => {
+                generator.downloadCard();
+            });
+
+            // Show content
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('content').classList.remove('hidden');
+        }
+
+        function showError(message) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error-message').textContent = message;
+            document.getElementById('error').classList.remove('hidden');
+        }
+
+        // Start when page loads
+        init();
+    </script>
+</body>
+</html>
