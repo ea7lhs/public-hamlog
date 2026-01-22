@@ -23,7 +23,7 @@
                 const config = response.ok ? await response.json() : { cssFile: 'default.css' };
                 const link = document.createElement('link');
                 link.rel = 'stylesheet';
-                link.href = 'styles/' + (config.cssFile || 'default.css');
+                link.href = config.cssFile || 'default.css';
                 
                 // Mostrar body cuando el CSS se cargue
                 link.onload = function() {
@@ -54,7 +54,7 @@
         <div class="header">
             <div class="callsign" id="callsign">EA7LHS</div>
             <h1>Logbook Statistics</h1>
-            <div class="subtitle">Amateur Radio Contact Analysis by EA7LHS</div>
+            <div class="subtitle">Amateur Radio Contact Analysis</div>
         </div>
 
         <div id="loading" class="loading">
@@ -174,26 +174,39 @@
 
             parseADI(text) {
                 const contacts = [];
-                const records = text.split('<eor>');
+                
+                // Split by <EOR> or <eor> (case insensitive)
+                const records = text.split(/<eor>/i);
                 
                 for (let record of records) {
-                    if (record.trim().length === 0 || record.includes('<eoh>')) continue;
+                    // Skip empty records or header
+                    if (record.trim().length === 0 || /<eoh>/i.test(record)) continue;
                     
                     const contact = {};
-                    const fieldRegex = /<(\w+):(\d+)>([^<]*)/g;
+                    
+                    // More robust regex that handles any ADIF field format
+                    // Matches: <FIELD:LENGTH[:TYPE]>VALUE
+                    const fieldRegex = /<(\w+):(\d+)(?::\w+)?>\s*([^<]*)/gi;
                     let match;
                     
                     while ((match = fieldRegex.exec(record)) !== null) {
-                        const [, fieldName, , fieldValue] = match;
-                        contact[fieldName.toLowerCase()] = fieldValue.trim();
+                        const fieldName = match[1].toLowerCase();
+                        const fieldLength = parseInt(match[2]);
+                        const fieldValue = match[3].substring(0, fieldLength).trim();
+                        
+                        if (fieldValue) {
+                            contact[fieldName] = fieldValue;
+                        }
                     }
                     
-                    if (contact.call) {
+                    // Only add contacts that have at least a callsign
+                    if (contact.call && contact.call.length > 0) {
                         contacts.push(contact);
                     }
                 }
                 
                 this.contacts = contacts;
+                console.log(`Parsed ${contacts.length} contacts from ADIF file`);
                 return contacts;
             }
 
@@ -479,19 +492,27 @@
             const term = searchTerm.toLowerCase().trim();
             const results = [];
             
-            // Parse the logbook text and search
-            const records = logbookText.split('<eor>');
+            // Parse the logbook text and search (case insensitive)
+            const records = logbookText.split(/<eor>/i);
             
             for (let record of records) {
-                if (record.trim().length === 0 || record.includes('<eoh>')) continue;
+                // Skip empty records or header
+                if (record.trim().length === 0 || /<eoh>/i.test(record)) continue;
                 
                 const contact = {};
-                const fieldRegex = /<(\w+):(\d+)>([^<]*)/g;
+                
+                // More robust regex that handles any ADIF field format
+                const fieldRegex = /<(\w+):(\d+)(?::\w+)?>\s*([^<]*)/gi;
                 let match;
                 
                 while ((match = fieldRegex.exec(record)) !== null) {
-                    const [, fieldName, , fieldValue] = match;
-                    contact[fieldName.toLowerCase()] = fieldValue.trim();
+                    const fieldName = match[1].toLowerCase();
+                    const fieldLength = parseInt(match[2]);
+                    const fieldValue = match[3].substring(0, fieldLength).trim();
+                    
+                    if (fieldValue) {
+                        contact[fieldName] = fieldValue;
+                    }
                 }
                 
                 if (!contact.call) continue;

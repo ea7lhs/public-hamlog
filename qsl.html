@@ -23,7 +23,7 @@
                 const config = response.ok ? await response.json() : { cssFile: 'default.css' };
                 const link = document.createElement('link');
                 link.rel = 'stylesheet';
-                link.href = 'styles/' + (config.cssFile || 'default.css');
+                link.href = config.cssFile || 'default.css';
                 
                 // Mostrar body cuando el CSS se cargue
                 link.onload = function() {
@@ -165,22 +165,32 @@
                     if (!response.ok) throw new Error('Logbook not found');
                     
                     const text = await response.text();
-                    const records = text.split('<eor>');
+                    
+                    // Split by <EOR> or <eor> (case insensitive)
+                    const records = text.split(/<eor>/i);
                     
                     for (let record of records) {
-                        if (record.trim().length === 0 || record.includes('<eoh>')) continue;
+                        // Skip empty records or header
+                        if (record.trim().length === 0 || /<eoh>/i.test(record)) continue;
                         
                         const contact = {};
-                        const fieldRegex = /<(\w+):(\d+)>([^<]*)/g;
+                        
+                        // More robust regex that handles any ADIF field format
+                        const fieldRegex = /<(\w+):(\d+)(?::\w+)?>\s*([^<]*)/gi;
                         let match;
                         
                         while ((match = fieldRegex.exec(record)) !== null) {
-                            const [, fieldName, , fieldValue] = match;
-                            contact[fieldName.toLowerCase()] = fieldValue.trim();
+                            const fieldName = match[1].toLowerCase();
+                            const fieldLength = parseInt(match[2]);
+                            const fieldValue = match[3].substring(0, fieldLength).trim();
+                            
+                            if (fieldValue) {
+                                contact[fieldName] = fieldValue;
+                            }
                         }
                         
                         // Verify this is the contact we're looking for
-                        if (contact.call === call.toUpperCase()) {
+                        if (contact.call && contact.call.toUpperCase() === call.toUpperCase()) {
                             if (date && contact.qso_date !== date) continue;
                             if (time && contact.time_on !== time) continue;
                             return contact;
